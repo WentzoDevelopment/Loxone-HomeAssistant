@@ -88,17 +88,15 @@ class LoxoneAuth:
         if isinstance(key_info, str):
             key_info = json.loads(key_info)
 
-        # Loxone returns key and salt as hex-encoded ASCII strings
+        # Loxone returns key and salt as hex-encoded ASCII strings.
+        # IMPORTANT: Use them as-is (raw hex strings), NOT decoded!
+        # PyLoxone and lxcommunicator both use the raw values directly.
         raw_key = key_info.get("key", "")
         raw_salt = key_info.get("salt", "")
         hash_alg = key_info.get("hashAlg", "SHA256")
 
-        # Decode hex-encoded ASCII to get the actual values
-        hmac_key = bytes.fromhex(raw_key).decode("utf-8")
-        pw_salt = bytes.fromhex(raw_salt).decode("utf-8")
-
-        _LOGGER.debug("Auth step 3: hashAlg=%s, hmac_key=%s..., pw_salt=%s...",
-                       hash_alg, hmac_key[:8], pw_salt[:8])
+        _LOGGER.debug("Auth step 3: hashAlg=%s, raw_key=%s..., raw_salt=%s...",
+                       hash_alg, raw_key[:16], raw_salt[:16])
 
         # Step 4: Compute HMAC hash of credentials
         if hash_alg.upper() == "SHA1":
@@ -106,13 +104,15 @@ class LoxoneAuth:
         else:
             digest = hashlib.sha256
 
+        # Password hash: SHA256("password:raw_salt") — raw hex salt, NOT decoded
         pw_hash = digest(
-            f"{self._password}:{pw_salt}".encode("utf-8")
+            f"{self._password}:{raw_salt}".encode("utf-8")
         ).hexdigest().upper()
 
+        # HMAC: key = bytes.fromhex(raw_key) = single decode (40 ASCII bytes)
         credential = f"{self._username}:{pw_hash}"
         hash_value = hmac.new(
-            bytes.fromhex(hmac_key), credential.encode("utf-8"), digest
+            bytes.fromhex(raw_key), credential.encode("utf-8"), digest
         ).hexdigest()
 
         # Step 5: Request JWT token (encrypted via AES)
