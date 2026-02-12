@@ -111,8 +111,8 @@ class LoxoneWebSocket:
                 f"Cannot connect to {url}: {err}"
             ) from err
 
-        # Authenticate
-        await self._auth.authenticate(self._ws)
+        # Authenticate (public key via HTTP, rest via WebSocket)
+        await self._auth.authenticate(self._ws, self._session, self._host, self._port)
 
         # Fetch structure file
         await self._ws.send_str(CMD_GET_STRUCTURE)
