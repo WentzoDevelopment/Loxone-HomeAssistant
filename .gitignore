@@ -25,3 +25,12 @@ wheels/
 
 # PyCharm
 .idea/
+
+#AI (Claude, Codex etc)
+.claude/
+.codex/
+CLAUDE.md
+plan.md
+
+#Loxone json
+LoxAPP3.json
