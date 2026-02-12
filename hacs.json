@@ -1,4 +1,5 @@
 {
   "name": "Loxone Energy",
-  "render_readme": true
+  "render_readme": true,
+  "domains": ["loxone_energy"]
 }
