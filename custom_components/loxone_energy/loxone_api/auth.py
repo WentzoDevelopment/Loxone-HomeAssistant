@@ -53,23 +53,7 @@ class LoxoneAuth:
         await ws.send_str(CMD_GET_PUBLIC_KEY)
         resp = await self._read_text_response(ws)
         key_pem = self._extract_value(resp)
-        # Loxone returns the key without proper PEM wrapping sometimes
-        if "BEGIN" not in key_pem:
-            key_pem = (
-                "-----BEGIN CERTIFICATE-----\n"
-                + key_pem
-                + "\n-----END CERTIFICATE-----"
-            )
-        try:
-            from cryptography import x509
-
-            cert = x509.load_pem_x509_certificate(key_pem.encode())
-            self._public_key = cert.public_key()
-        except Exception:
-            # Try loading as raw public key
-            if "CERTIFICATE" in key_pem:
-                key_pem = key_pem.replace("CERTIFICATE", "PUBLIC KEY")
-            self._public_key = serialization.load_pem_public_key(key_pem.encode())
+        self._public_key = self._parse_public_key(key_pem, serialization)
 
         # Step 2: Generate AES-256 session key + IV, RSA-encrypt, key exchange
         self._aes_key = os.urandom(32)
@@ -142,6 +126,29 @@ class LoxoneAuth:
         # Loxone uses seconds since 2009-01-01
         self._token_valid_until = valid_until
         _LOGGER.info("Authentication successful, token obtained")
+
+    @staticmethod
+    def _parse_public_key(raw_key: str, serialization: Any) -> Any:
+        """Parse Loxone's public key (SubjectPublicKeyInfo in PEM-like format).
+
+        Loxone wraps a SubjectPublicKeyInfo in CERTIFICATE headers
+        and returns it without PEM line breaks. We fix the formatting
+        and load it as a public key.
+        """
+        import re
+        import textwrap
+
+        # Extract the raw base64 content, stripping any PEM headers
+        b64 = re.sub(
+            r"-----(?:BEGIN|END)\s+\w+-----", "", raw_key
+        ).replace("\n", "").replace("\r", "").strip()
+
+        # Re-wrap as proper PEM with 64-char lines
+        wrapped = "\n".join(textwrap.wrap(b64, 64))
+        pem = f"-----BEGIN PUBLIC KEY-----\n{wrapped}\n-----END PUBLIC KEY-----"
+
+        _LOGGER.debug("Parsed public key (%d base64 chars)", len(b64))
+        return serialization.load_pem_public_key(pem.encode())
 
     def _aes_encrypt(self, plaintext: str, Cipher: Any, algorithms: Any, modes: Any) -> str:
         """AES-256-CBC encrypt and return URL-safe base64."""
