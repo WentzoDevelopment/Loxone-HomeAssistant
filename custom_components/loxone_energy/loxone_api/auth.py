@@ -93,8 +93,17 @@ class LoxoneAuth:
         if isinstance(key_info, str):
             key_info = json.loads(key_info)
 
-        salt = key_info.get("key", key_info.get("salt", ""))
+        # Loxone returns key and salt as hex-encoded ASCII strings
+        raw_key = key_info.get("key", "")
+        raw_salt = key_info.get("salt", "")
         hash_alg = key_info.get("hashAlg", "SHA256")
+
+        # Decode hex-encoded ASCII to get the actual values
+        hmac_key = bytes.fromhex(raw_key).decode("utf-8")   # e.g. "55E76F28..."
+        pw_salt = bytes.fromhex(raw_salt).decode("utf-8")   # e.g. "1d955ba3-0016-..."
+
+        _LOGGER.debug("hashAlg=%s, hmac_key=%s..., pw_salt=%s...",
+                       hash_alg, hmac_key[:8], pw_salt[:8])
 
         # Step 4: Compute HMAC hash of credentials
         if hash_alg.upper() == "SHA1":
@@ -102,15 +111,15 @@ class LoxoneAuth:
         else:
             digest = hashlib.sha256
 
-        # Hash the password: uppercase(hex(hash(password:salt)))
+        # Hash the password with the SALT: uppercase(hex(hash(password:salt)))
         pw_hash = digest(
-            f"{self._password}:{salt}".encode("utf-8")
+            f"{self._password}:{pw_salt}".encode("utf-8")
         ).hexdigest().upper()
 
-        # HMAC of "user:pwHash" with the salt as key
+        # HMAC of "user:pwHash" with the KEY as HMAC key
         credential = f"{self._username}:{pw_hash}"
         hash_value = hmac.new(
-            bytes.fromhex(salt), credential.encode("utf-8"), digest
+            bytes.fromhex(hmac_key), credential.encode("utf-8"), digest
         ).hexdigest()
 
         # Step 5: Request JWT token (encrypted via AES)
