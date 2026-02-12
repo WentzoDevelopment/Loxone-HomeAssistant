@@ -52,9 +52,11 @@ class LoxoneEnergyConfigFlow(ConfigFlow, domain=DOMAIN):
                 structure = await connection.start(
                     on_state_update=lambda _: None,
                 )
-            except LoxoneAuthError:
+            except LoxoneAuthError as err:
+                _LOGGER.error("Authentication failed: %s", err)
                 errors["base"] = "invalid_auth"
-            except (LoxoneConnectionError, aiohttp.ClientError, TimeoutError):
+            except (LoxoneConnectionError, aiohttp.ClientError, TimeoutError) as err:
+                _LOGGER.error("Connection failed: %s", err)
                 errors["base"] = "cannot_connect"
             except Exception:
                 _LOGGER.exception("Unexpected error during setup")

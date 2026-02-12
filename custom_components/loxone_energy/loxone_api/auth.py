@@ -50,12 +50,15 @@ class LoxoneAuth:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
         # Step 1: Get RSA public key
+        _LOGGER.debug("Auth step 1: Getting public key")
         await ws.send_str(CMD_GET_PUBLIC_KEY)
         resp = await self._read_text_response(ws)
         key_pem = self._extract_value(resp)
         self._public_key = self._parse_public_key(key_pem, serialization)
+        _LOGGER.debug("Auth step 1: Public key parsed OK")
 
         # Step 2: Generate AES-256 session key + IV, RSA-encrypt, key exchange
+        _LOGGER.debug("Auth step 2: Key exchange")
         self._aes_key = os.urandom(32)
         self._aes_iv = os.urandom(16)
         session_key = f"{self._aes_key.hex()}:{self._aes_iv.hex()}"
@@ -68,9 +71,10 @@ class LoxoneAuth:
         )
         await ws.send_str(key_exchange_cmd)
         resp = await self._read_text_response(ws)
-        _LOGGER.debug("Key exchange response: %s", resp)
+        _LOGGER.debug("Auth step 2: Key exchange response: %s", resp)
 
         # Step 3: Get salt and hash info for the user
+        _LOGGER.debug("Auth step 3: getkey2 for user '%s'", self._username)
         await ws.send_str(CMD_GET_KEY2.format(self._username))
         resp = await self._read_text_response(ws)
         key_info = self._extract_value(resp)
@@ -83,10 +87,10 @@ class LoxoneAuth:
         hash_alg = key_info.get("hashAlg", "SHA256")
 
         # Decode hex-encoded ASCII to get the actual values
-        hmac_key = bytes.fromhex(raw_key).decode("utf-8")   # e.g. "55E76F28..."
-        pw_salt = bytes.fromhex(raw_salt).decode("utf-8")   # e.g. "1d955ba3-0016-..."
+        hmac_key = bytes.fromhex(raw_key).decode("utf-8")
+        pw_salt = bytes.fromhex(raw_salt).decode("utf-8")
 
-        _LOGGER.debug("hashAlg=%s, hmac_key=%s..., pw_salt=%s...",
+        _LOGGER.debug("Auth step 3: hashAlg=%s, hmac_key=%s..., pw_salt=%s...",
                        hash_alg, hmac_key[:8], pw_salt[:8])
 
         # Step 4: Compute HMAC hash of credentials
@@ -95,12 +99,10 @@ class LoxoneAuth:
         else:
             digest = hashlib.sha256
 
-        # Hash the password with the SALT: uppercase(hex(hash(password:salt)))
         pw_hash = digest(
             f"{self._password}:{pw_salt}".encode("utf-8")
         ).hexdigest().upper()
 
-        # HMAC of "user:pwHash" with the KEY as HMAC key
         credential = f"{self._username}:{pw_hash}"
         hash_value = hmac.new(
             bytes.fromhex(hmac_key), credential.encode("utf-8"), digest
@@ -110,20 +112,20 @@ class LoxoneAuth:
         token_cmd = CMD_GET_TOKEN.format(
             hash_value, self._username, TOKEN_PERMISSION
         )
-        # Add token UUID and info
         token_cmd += f"/{TOKEN_UUID}/{TOKEN_INFO}"
+        _LOGGER.debug("Auth step 5: Token command (unencrypted): %s",
+                       token_cmd[:60] + "...")
 
-        # Encrypt the command
         encrypted_cmd = self._aes_encrypt(token_cmd, Cipher, algorithms, modes)
         await ws.send_str(CMD_ENCRYPT.format(encrypted_cmd))
         resp = await self._read_text_response(ws)
+        _LOGGER.debug("Auth step 5: Token response: %s", resp)
         token_data = self._extract_value(resp)
         if isinstance(token_data, str):
             token_data = json.loads(token_data)
 
         self._token = token_data.get("token", "")
         valid_until = token_data.get("validUntil", 0)
-        # Loxone uses seconds since 2009-01-01
         self._token_valid_until = valid_until
         _LOGGER.info("Authentication successful, token obtained")
 
